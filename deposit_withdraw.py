@@ -192,7 +192,8 @@ _FETCHERS = {
 def _fetch_one(name):
     try:
         return name, _FETCHERS[name]()
-    except Exception:
+    except Exception as e:
+        print(f"[dw] {name} error: {type(e).__name__}: {e}")
         return name, {}
 
 
