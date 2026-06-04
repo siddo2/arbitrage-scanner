@@ -1,146 +1,120 @@
 #!/usr/bin/env python3
 """
-Fetch deposit/withdrawal status per coin for each exchange using public APIs only.
+Fetch deposit/withdrawal status per coin using CCXT.
+Uses API keys from environment variables when available, falls back to public access.
 """
 
-import requests
+import os
+import ccxt
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-TIMEOUT = 10
+# Exchange CCXT class mapping + env var names for API keys
+EXCHANGE_CONFIG = {
+    "Binance": {
+        "class": ccxt.binance,
+        "key_env": "BINANCE_API_KEY",
+        "secret_env": "BINANCE_SECRET",
+    },
+    "OKX": {
+        "class": ccxt.okx,
+        "key_env": "OKX_API_KEY",
+        "secret_env": "OKX_SECRET",
+        "passphrase_env": "OKX_PASSPHRASE",
+    },
+    "KuCoin": {
+        "class": ccxt.kucoin,
+        "key_env": "KUCOIN_API_KEY",
+        "secret_env": "KUCOIN_SECRET",
+        "passphrase_env": "KUCOIN_PASSPHRASE",
+    },
+    "Gate.io": {
+        "class": ccxt.gateio,
+        "key_env": "GATEIO_API_KEY",
+        "secret_env": "GATEIO_SECRET",
+    },
+    "MEXC": {
+        "class": ccxt.mexc,
+        "key_env": "MEXC_API_KEY",
+        "secret_env": "MEXC_SECRET",
+    },
+    "HTX": {
+        "class": ccxt.htx,
+        "key_env": "HTX_API_KEY",
+        "secret_env": "HTX_SECRET",
+    },
+    "CoinEx": {
+        "class": ccxt.coinex,
+        "key_env": "COINEX_API_KEY",
+        "secret_env": "COINEX_SECRET",
+    },
+    "BitMart": {
+        "class": ccxt.bitmart,
+        "key_env": "BITMART_API_KEY",
+        "secret_env": "BITMART_SECRET",
+        "passphrase_env": "BITMART_MEMO",
+    },
+    "LBank": {
+        "class": ccxt.lbank,
+        "key_env": "LBANK_API_KEY",
+        "secret_env": "LBANK_SECRET",
+    },
+    "AscendEX": {
+        "class": ccxt.ascendex,
+        "key_env": "ASCENDEX_API_KEY",
+        "secret_env": "ASCENDEX_SECRET",
+    },
+    "XT": {
+        "class": ccxt.xt,
+        "key_env": "XT_API_KEY",
+        "secret_env": "XT_SECRET",
+    },
+}
 
 
-def _fetch_gateio():
-    """Gate.io public endpoint — no auth required."""
+def _build_exchange(name, cfg):
+    params = {"timeout": 15000, "enableRateLimit": True}
+    key = os.environ.get(cfg.get("key_env", ""))
+    secret = os.environ.get(cfg.get("secret_env", ""))
+    if key and secret:
+        params["apiKey"] = key
+        params["secret"] = secret
+    pp = os.environ.get(cfg.get("passphrase_env", ""), "")
+    if pp:
+        params["password"] = pp
+    return cfg["class"](params)
+
+
+def _fetch_one(name, cfg):
     try:
-        resp = requests.get(
-            "https://api.gateio.ws/api/v4/spot/currencies",
-            timeout=TIMEOUT,
-        )
-        resp.raise_for_status()
+        exchange = _build_exchange(name, cfg)
+        # fetch_currencies requires auth on most exchanges
+        if not exchange.apiKey:
+            return name, {}
+        currencies = exchange.fetch_currencies()
         result = {}
-        for item in resp.json():
-            coin = item.get("currency", "").upper()
-            if not coin:
-                continue
-            result[coin] = {
-                "deposit": not item.get("deposit_disabled", False),
-                "withdraw": not item.get("withdraw_disabled", False),
+        for coin, data in currencies.items():
+            coin_upper = coin.upper()
+            result[coin_upper] = {
+                "deposit": bool(data.get("deposit", data.get("active", False))),
+                "withdraw": bool(data.get("withdraw", data.get("active", False))),
             }
-        return result
+        return name, result
     except Exception:
-        return {}
-
-
-def _fetch_kucoin():
-    """KuCoin public endpoint — no auth required."""
-    try:
-        resp = requests.get(
-            "https://api.kucoin.com/api/v2/currencies",
-            timeout=TIMEOUT,
-        )
-        resp.raise_for_status()
-        data = resp.json().get("data", [])
-        result = {}
-        for item in data:
-            coin = item.get("currency", "").upper()
-            if not coin:
-                continue
-            result[coin] = {
-                "deposit": bool(item.get("isDepositEnabled", False)),
-                "withdraw": bool(item.get("isWithdrawEnabled", False)),
-            }
-        return result
-    except Exception:
-        return {}
-
-
-def _fetch_htx():
-    """HTX/Huobi public endpoint — no auth required."""
-    try:
-        resp = requests.get(
-            "https://api.huobi.pro/v2/reference/currencies",
-            timeout=TIMEOUT,
-        )
-        resp.raise_for_status()
-        data = resp.json().get("data", [])
-        result = {}
-        for item in data:
-            coin = item.get("currency", "").upper()
-            if not coin:
-                continue
-            chains = item.get("chains", [])
-            if not chains:
-                continue
-            # Coin is enabled if ANY chain allows it
-            deposit_ok = any(
-                c.get("depositStatus", "prohibited") == "allowed"
-                for c in chains
-            )
-            withdraw_ok = any(
-                c.get("withdrawStatus", "prohibited") == "allowed"
-                for c in chains
-            )
-            result[coin] = {"deposit": deposit_ok, "withdraw": withdraw_ok}
-        return result
-    except Exception:
-        return {}
-
-
-def _fetch_mexc():
-    """MEXC public endpoint — may require auth, returns {} on failure."""
-    try:
-        resp = requests.get(
-            "https://api.mexc.com/api/v3/capital/config/getall",
-            timeout=TIMEOUT,
-        )
-        resp.raise_for_status()
-        result = {}
-        for item in resp.json():
-            coin = item.get("coin", "").upper()
-            if not coin:
-                continue
-            network_list = item.get("networkList", [])
-            if not network_list:
-                continue
-            deposit_ok = any(n.get("depositEnable", False) for n in network_list)
-            withdraw_ok = any(n.get("withdrawEnable", False) for n in network_list)
-            result[coin] = {"deposit": deposit_ok, "withdraw": withdraw_ok}
-        return result
-    except Exception:
-        return {}
+        return name, {}
 
 
 def fetch_deposit_withdraw_status() -> dict:
     """
-    Returns a dict keyed by exchange name, each value a dict of
-    coin -> {"deposit": bool, "withdraw": bool}.
-    Unknown exchanges or failed fetches return empty dicts.
+    Returns dict: {exchange_name: {coin: {"deposit": bool, "withdraw": bool}}}
+    Empty dict for an exchange means status unknown (no API key or fetch failed).
     """
-    fetchers = {
-        "Gate.io": _fetch_gateio,
-        "KuCoin": _fetch_kucoin,
-        "HTX": _fetch_htx,
-        "MEXC": _fetch_mexc,
-        # Auth required or no known public endpoint — return empty (unknown)
-        "Binance": lambda: {},
-        "OKX": lambda: {},
-        "CoinEx": lambda: {},
-        "BitMart": lambda: {},
-        "LBank": lambda: {},
-        "AscendEX": lambda: {},
-        "XT": lambda: {},
-    }
-
     results = {}
-    with ThreadPoolExecutor(max_workers=6) as executor:
-        future_to_name = {
-            executor.submit(fn): name for name, fn in fetchers.items()
+    with ThreadPoolExecutor(max_workers=11) as executor:
+        futures = {
+            executor.submit(_fetch_one, name, cfg): name
+            for name, cfg in EXCHANGE_CONFIG.items()
         }
-        for future in as_completed(future_to_name):
-            name = future_to_name[future]
-            try:
-                results[name] = future.result()
-            except Exception:
-                results[name] = {}
-
+        for future in as_completed(futures):
+            name, data = future.result()
+            results[name] = data
     return results
