@@ -313,6 +313,34 @@
     .volume { color: var(--text-muted); }
     .excount { color: var(--text-muted); text-align: center; }
 
+    /* Deposit / Withdraw status cells */
+    .dw-cell { text-align: center; font-size: 15px; }
+    .dw-ok      { color: var(--green); }
+    .dw-fail    { color: var(--red); }
+    .dw-unknown { color: var(--text-muted); }
+
+    /* Hide-impossible checkbox */
+    .hide-impossible-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: var(--bg3);
+      font-size: 12px;
+      user-select: none;
+      white-space: nowrap;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .hide-impossible-wrap input { display: none; }
+    .hide-impossible-wrap.checked {
+      border-color: var(--red);
+      background: rgba(248,81,73,0.10);
+      color: var(--red);
+    }
+
     /* Empty state */
     .empty-state {
       text-align: center;
@@ -449,6 +477,14 @@
     <div class="exchange-checks" id="exchange-checks"></div>
   </div>
 
+  <div class="filter-group">
+    <div class="filter-label">Feasibility</div>
+    <label class="hide-impossible-wrap" id="hide-impossible-label" title="Hide rows where deposit or withdrawal is disabled">
+      <input type="checkbox" id="hide-impossible-cb" />
+      Hide impossible
+    </label>
+  </div>
+
   <button class="btn" id="reset-btn">Reset Filters</button>
 </div>
 
@@ -463,6 +499,8 @@
         <th data-col="buy_price">BUY PRICE</th>
         <th data-col="sell_exchange">SELL ON</th>
         <th data-col="sell_price">SELL PRICE</th>
+        <th data-col="deposit_ok">DEP</th>
+        <th data-col="withdraw_ok">WIT</th>
         <th data-col="spread_brut">GROSS SPREAD</th>
         <th data-col="spread_net">NET SPREAD</th>
         <th data-col="fees">FEES</th>
@@ -471,7 +509,7 @@
       </tr>
     </thead>
     <tbody id="table-body">
-      <tr><td colspan="11"><div class="empty-state"><div class="icon">⏳</div><p>Loading…</p></div></td></tr>
+      <tr><td colspan="13"><div class="empty-state"><div class="icon">⏳</div><p>Loading…</p></div></td></tr>
     </tbody>
   </table>
 </div>
@@ -494,6 +532,7 @@
   let sortCol = 'spread_brut';
   let sortDir = -1; // -1 desc
   let refreshTimer = null;
+  let hideImpossible = false;
 
   const $ = id => document.getElementById(id);
 
@@ -513,10 +552,12 @@
   const spreadVal     = $('spread-val');
   const volumeInput   = $('volume-input');
   const pairSearch    = $('pair-search');
-  const resetBtn      = $('reset-btn');
-  const loadingOverlay= $('loading-overlay');
-  const toast         = $('toast');
-  const tableEl       = $('main-table');
+  const resetBtn           = $('reset-btn');
+  const loadingOverlay     = $('loading-overlay');
+  const toast              = $('toast');
+  const tableEl            = $('main-table');
+  const hideImpossibleCb   = $('hide-impossible-cb');
+  const hideImpossibleLabel= $('hide-impossible-label');
 
   // Set of exchanges the user has UNCHECKED (excluded)
   const excludedExchanges = new Set();
@@ -565,6 +606,9 @@
         if (buyExcluded && sellExcluded) return false;
       }
       if (search && !op.pair.toUpperCase().includes(search)) return false;
+      if (hideImpossible) {
+        if (op.deposit_ok === false || op.withdraw_ok === false) return false;
+      }
       return true;
     });
   }
@@ -607,10 +651,16 @@
   function sign(v) { return v >= 0 ? '+' : ''; }
 
   // ── Render table rows ──
+  function dwCell(val) {
+    if (val === true)  return '<td class="dw-cell dw-ok">✓</td>';
+    if (val === false) return '<td class="dw-cell dw-fail">✗</td>';
+    return '<td class="dw-cell dw-unknown">?</td>';
+  }
+
   function renderTable(ops) {
     if (!ops.length) {
       tableBody.innerHTML =
-        '<tr><td colspan="11"><div class="empty-state">' +
+        '<tr><td colspan="13"><div class="empty-state">' +
         '<div class="icon">🔍</div>' +
         '<p>No opportunities match your filters.</p></div></td></tr>';
       return;
@@ -620,6 +670,8 @@
       const sc   = spreadClass(op.spread_brut);
       const icon = spreadIcon(op.spread_brut);
       const vol  = op.volume_display || 'N/A';
+      const dep  = op.deposit_ok  !== undefined ? op.deposit_ok  : null;
+      const wit  = op.withdraw_ok !== undefined ? op.withdraw_ok : null;
       return '<tr>' +
         '<td>' + (i + 1) + '</td>' +
         '<td class="pair-cell">' + icon + escHtml(op.pair) + '</td>' +
@@ -627,6 +679,8 @@
         '<td class="price">'         + formatPrice(op.buy_price)  + '</td>' +
         '<td class="exchange-sell">' + escHtml(op.sell_exchange) + '</td>' +
         '<td class="price">'         + formatPrice(op.sell_price) + '</td>' +
+        dwCell(dep) +
+        dwCell(wit) +
         '<td class="spread ' + sc + '">' + sign(op.spread_brut) + op.spread_brut.toFixed(3) + '%</td>' +
         '<td class="spread ' + spreadClass(op.spread_net) + '">' + sign(op.spread_net) + op.spread_net.toFixed(3) + '%</td>' +
         '<td class="fees">-' + op.fees.toFixed(3) + '%</td>' +
@@ -771,6 +825,15 @@
   volumeInput.addEventListener('input', applyFiltersAndRender);
   pairSearch.addEventListener('input', applyFiltersAndRender);
 
+  hideImpossibleLabel.addEventListener('click', e => {
+    e.preventDefault();
+    hideImpossible = !hideImpossible;
+    hideImpossibleCb.checked = hideImpossible;
+    if (hideImpossible) hideImpossibleLabel.classList.add('checked');
+    else hideImpossibleLabel.classList.remove('checked');
+    applyFiltersAndRender();
+  });
+
   resetBtn.addEventListener('click', () => {
     spreadSlider.value = '0.3';
     spreadVal.textContent = '0.3%';
@@ -781,6 +844,9 @@
       label.classList.add('checked');
       label.querySelector('input').checked = true;
     });
+    hideImpossible = false;
+    hideImpossibleCb.checked = false;
+    hideImpossibleLabel.classList.remove('checked');
     applyFiltersAndRender();
   });
 

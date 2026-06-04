@@ -12,6 +12,7 @@ from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
 
 from arbitrage_scanner import fetch_all_exchanges, find_opportunities, EXCHANGES
+from deposit_withdraw import fetch_deposit_withdraw_status
 
 app = Flask(__name__)
 CORS(app)
@@ -21,6 +22,9 @@ CORS(app)
 # ─────────────────────────────────────────────
 
 _lock = threading.Lock()
+_dw_lock = threading.Lock()
+_dw_state = {}  # deposit/withdraw status cache
+
 _state = {
     "opportunities": [],
     "metadata": {
@@ -34,6 +38,7 @@ _state = {
 }
 
 REFRESH_INTERVAL = 15  # seconds
+DW_REFRESH_CYCLES = 20  # refresh DW status every N cycles (~5 minutes at 15s)
 DEFAULT_MIN_SPREAD = 0.3
 DEFAULT_MIN_VOLUME = 50000
 
@@ -51,6 +56,18 @@ def _format_volume(vol):
     return f"${vol:.0f}"
 
 
+def _refresh_dw():
+    """Fetch deposit/withdraw status and update cache."""
+    try:
+        dw = fetch_deposit_withdraw_status()
+        with _dw_lock:
+            _dw_state.clear()
+            _dw_state.update(dw)
+        print("[dw] deposit/withdraw status refreshed")
+    except Exception as e:
+        print(f"[dw] error: {e}")
+
+
 def _do_refresh():
     """Fetch data from all exchanges and update global state."""
     with _lock:
@@ -60,6 +77,10 @@ def _do_refresh():
         t0 = time.time()
         market_data, errors = fetch_all_exchanges(verbose=False)
         elapsed = time.time() - t0
+
+        # Snapshot current DW state
+        with _dw_lock:
+            dw = dict(_dw_state)
 
         # Fetch raw opportunities with loose filters; per-request filtering applied later
         opportunities = find_opportunities(
@@ -78,6 +99,16 @@ def _do_refresh():
             else:
                 item["volume"] = raw_vol
                 item["volume_display"] = _format_volume(raw_vol)
+
+            # Enrich with deposit/withdraw status
+            coin = item["pair"].split("/")[0]
+            buy_ex = item["buy_exchange"]
+            sell_ex = item["sell_exchange"]
+            buy_dw = dw.get(buy_ex, {}).get(coin)
+            sell_dw = dw.get(sell_ex, {}).get(coin)
+            item["deposit_ok"] = buy_dw["deposit"] if buy_dw else None
+            item["withdraw_ok"] = sell_dw["withdraw"] if sell_dw else None
+
             serialized.append(item)
 
         with _lock:
@@ -99,8 +130,14 @@ def _do_refresh():
 
 def _background_loop():
     """Background thread: refreshes data every REFRESH_INTERVAL seconds."""
+    cycle = 0
+    # Do first DW fetch before any price refresh
+    _refresh_dw()
     while True:
         _do_refresh()
+        cycle += 1
+        if cycle % DW_REFRESH_CYCLES == 0:
+            _refresh_dw()
         time.sleep(REFRESH_INTERVAL)
 
 
@@ -161,6 +198,13 @@ def api_opportunities():
         "opportunities": filtered,
         "metadata": meta,
     })
+
+
+@app.route("/api/deposit-withdraw")
+def api_deposit_withdraw():
+    with _dw_lock:
+        dw = dict(_dw_state)
+    return jsonify(dw)
 
 
 @app.route("/api/status")
