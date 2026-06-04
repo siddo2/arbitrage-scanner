@@ -6,6 +6,9 @@ Fetch deposit/withdrawal status per coin per exchange.
 """
 
 import os
+import time
+import hmac
+import hashlib
 import requests
 import ccxt
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -59,7 +62,21 @@ def _public_htx():
 
 
 def _public_mexc():
-    resp = requests.get("https://api.mexc.com/api/v3/capital/config/getall", timeout=TIMEOUT)
+    return {}  # requires auth + IP whitelist, handled by _auth_mexc()
+
+
+def _auth_mexc():
+    """MEXC signed request with API key."""
+    api_key = os.environ.get("MEXC_API_KEY", "")
+    secret = os.environ.get("MEXC_SECRET", "")
+    if not api_key or not secret:
+        return {}
+    ts = str(int(time.time() * 1000))
+    query = f"timestamp={ts}"
+    sig = hmac.new(secret.encode(), query.encode(), hashlib.sha256).hexdigest()  # noqa
+    url = f"https://api.mexc.com/api/v3/capital/config/getall?{query}&signature={sig}"
+    headers = {"X-MEXC-APIKEY": api_key, "Content-Type": "application/json"}
+    resp = requests.get(url, headers=headers, timeout=TIMEOUT)
     resp.raise_for_status()
     result = {}
     for item in resp.json():
@@ -112,7 +129,7 @@ _PUBLIC_FETCHERS = {
     "Gate.io": _public_gateio,
     "KuCoin":  _public_kucoin,
     "HTX":     _public_htx,
-    "MEXC":    _public_mexc,
+    "MEXC":    _auth_mexc,
 }
 
 
