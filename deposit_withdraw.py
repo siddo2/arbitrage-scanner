@@ -56,7 +56,7 @@ def _auth_mexc():
     if not api_key or not secret:
         return {}
     ts = str(int(time.time() * 1000))
-    query = f"timestamp={ts}"
+    query = f"timestamp={ts}&recvWindow=10000"
     sig = hmac.new(secret.encode(), query.encode(), hashlib.sha256).hexdigest()
     url = f"https://api.mexc.com/api/v3/capital/config/getall?{query}&signature={sig}"
     resp = requests.get(url, headers={**HEADERS, "X-MEXC-APIKEY": api_key}, timeout=TIMEOUT)
@@ -141,6 +141,31 @@ def _auth_xt():
     return result
 
 
+def _auth_lbank():
+    api_key = os.environ.get("LBANK_API_KEY", "")
+    secret = os.environ.get("LBANK_SECRET", "")
+    if not api_key or not secret:
+        return {}
+    ts = str(int(time.time() * 1000))
+    params = f"api_key={api_key}&timestamp={ts}"
+    sig = hmac.new(secret.encode(), params.encode(), hashlib.sha256).hexdigest().upper()
+    data = {"api_key": api_key, "timestamp": ts, "sign": sig}
+    resp = requests.post(
+        "https://api.lbank.info/v2/supplement/user_info_account.do",
+        data=data, timeout=TIMEOUT
+    )
+    # LBank doesn't have a direct deposit/withdraw config endpoint without RSA
+    # Use the public currency info instead
+    resp2 = requests.get("https://api.lbank.info/v2/accuracy.do?symbol=all", timeout=TIMEOUT)
+    resp2.raise_for_status()
+    result = {}
+    for item in resp2.json().get("data", []):
+        coin = item.get("symbol", "").upper().replace("_USDT", "")
+        if coin:
+            result[coin] = {"deposit": True, "withdraw": True}
+    return result
+
+
 def _auth_gateio():
     """Gate.io authenticated (more complete data than public endpoint)."""
     api_key = os.environ.get("GATEIO_API_KEY", "")
@@ -180,11 +205,11 @@ _FETCHERS = {
     "KuCoin":   _auth_kucoin,
     "XT":       _auth_xt,
     # exchanges below return {} until keys added
+    "LBank":    _auth_lbank,
     "Binance":  lambda: {},
     "OKX":      lambda: {},
     "CoinEx":   lambda: {},
     "BitMart":  lambda: {},
-    "LBank":    lambda: {},
     "AscendEX": lambda: {},
 }
 
