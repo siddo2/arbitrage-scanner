@@ -197,11 +197,12 @@ def _auth_gateio():
     return result
 
 
-def _ascendex_headers(api_key, secret, path):
+def _ascendex_headers(api_key, secret, sign_path):
     ts = str(int(time.time() * 1000))
-    msg = f"{ts}+{path}"
+    # AscendEX signs with only the last part: e.g. "v1/info" not "api/pro/v1/info"
+    msg = f"{ts}+{sign_path}"
     sig = hmac.new(secret.encode(), msg.encode(), hashlib.sha256).hexdigest()
-    return {
+    return ts, {
         "x-auth-key": api_key,
         "x-auth-signature": sig,
         "x-auth-timestamp": ts,
@@ -214,21 +215,19 @@ def _auth_ascendex():
     secret = os.environ.get("ASCENDEX_SECRET", "")
     if not api_key or not secret:
         return {}
-    # Step 1: get account group
-    info_path = "api/pro/v1/info"
+    # Step 1: get account group — sign with "v1/info"
+    _, headers = _ascendex_headers(api_key, secret, "v1/info")
     info_resp = requests.get(
-        f"https://ascendex.com/{info_path}",
-        headers=_ascendex_headers(api_key, secret, info_path),
-        timeout=TIMEOUT
+        "https://ascendex.com/api/pro/v1/info",
+        headers=headers, timeout=TIMEOUT
     )
     info_resp.raise_for_status()
     group = info_resp.json().get("data", {}).get("accountGroup", 0)
-    # Step 2: fetch wallet assets with account group prefix
-    path = "api/pro/v1/wallet/asset"
+    # Step 2: fetch wallet assets — sign with "v1/wallet/asset"
+    _, headers2 = _ascendex_headers(api_key, secret, "v1/wallet/asset")
     resp = requests.get(
-        f"https://ascendex.com/{group}/{path}",
-        headers=_ascendex_headers(api_key, secret, path),
-        timeout=TIMEOUT
+        f"https://ascendex.com/{group}/api/pro/v1/wallet/asset",
+        headers=headers2, timeout=TIMEOUT
     )
     resp.raise_for_status()
     result = {}
