@@ -152,18 +152,23 @@ def _auth_lbank():
     sig = hmac.new(secret.encode(), query.encode(), hashlib.sha256).hexdigest().upper()
     data = {**params, "sign": sig, "sign_type": "1"}
     resp = requests.post(
-        "https://api.lbank.info/v2/supplement/user_info.do",
+        "https://api.lbank.info/v2/supplement/user_info_account.do",
         data=data, timeout=TIMEOUT
     )
-    resp.raise_for_status()
+    body = resp.json()
+    print(f"[dw] LBank raw response: {str(body)[:300]}")
     result = {}
-    for item in resp.json().get("data", {}).get("list", []):
-        coin = item.get("coinType", "").upper()
-        if coin:
-            result[coin] = {
-                "deposit": bool(item.get("isCanRecharge", False)),
-                "withdraw": bool(item.get("isCanWithdraw", False)),
-            }
+    items = body.get("data", {})
+    if isinstance(items, dict):
+        items = items.get("list", items.get("assets", []))
+    if isinstance(items, list):
+        for item in items:
+            coin = (item.get("coin") or item.get("coinType") or item.get("currency") or "").upper()
+            if coin:
+                result[coin] = {
+                    "deposit": bool(item.get("isCanRecharge", item.get("canDeposit", True))),
+                    "withdraw": bool(item.get("isCanWithdraw", item.get("canWithdraw", True))),
+                }
     return result
 
 
