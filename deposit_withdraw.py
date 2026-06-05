@@ -148,22 +148,21 @@ def _auth_lbank():
         return {}
     ts = str(int(time.time() * 1000))
     params = {"api_key": api_key, "timestamp": ts}
-    # Sort params alphabetically and build query string
     query = "&".join(f"{k}={params[k]}" for k in sorted(params))
     sig = hmac.new(secret.encode(), query.encode(), hashlib.sha256).hexdigest().upper()
-    data = {**params, "sign": sig, "sign_type": "1"}  # sign_type=1 = HMAC-SHA256
+    data = {**params, "sign": sig, "sign_type": "1"}
     resp = requests.post(
-        "https://api.lbank.info/v2/supplement/asset_detail.do",
+        "https://api.lbank.info/v2/supplement/user_info.do",
         data=data, timeout=TIMEOUT
     )
     resp.raise_for_status()
     result = {}
-    for item in resp.json().get("data", {}).get("assetInfo", []):
-        coin = item.get("coin", "").upper()
+    for item in resp.json().get("data", {}).get("list", []):
+        coin = item.get("coinType", "").upper()
         if coin:
             result[coin] = {
-                "deposit": bool(item.get("canDeposit", False)),
-                "withdraw": bool(item.get("canWithdraw", False)),
+                "deposit": bool(item.get("isCanRecharge", False)),
+                "withdraw": bool(item.get("isCanWithdraw", False)),
             }
     return result
 
@@ -204,7 +203,7 @@ def _auth_ascendex():
     if not api_key or not secret:
         return {}
     ts = str(int(time.time() * 1000))
-    path = "api/pro/v1/asset/list"
+    path = "api/pro/v1/wallet/asset"
     msg = f"{ts}+{path}"
     sig = hmac.new(secret.encode(), msg.encode(), hashlib.sha256).hexdigest()
     headers = {
