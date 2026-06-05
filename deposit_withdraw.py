@@ -147,22 +147,24 @@ def _auth_lbank():
     if not api_key or not secret:
         return {}
     ts = str(int(time.time() * 1000))
-    params = f"api_key={api_key}&timestamp={ts}"
-    sig = hmac.new(secret.encode(), params.encode(), hashlib.sha256).hexdigest().upper()
-    data = {"api_key": api_key, "timestamp": ts, "sign": sig}
+    params = {"api_key": api_key, "timestamp": ts}
+    # Sort params alphabetically and build query string
+    query = "&".join(f"{k}={params[k]}" for k in sorted(params))
+    sig = hmac.new(secret.encode(), query.encode(), hashlib.sha256).hexdigest().upper()
+    data = {**params, "sign": sig, "sign_type": "1"}  # sign_type=1 = HMAC-SHA256
     resp = requests.post(
-        "https://api.lbank.info/v2/supplement/user_info_account.do",
+        "https://api.lbank.info/v2/supplement/asset_detail.do",
         data=data, timeout=TIMEOUT
     )
-    # LBank doesn't have a direct deposit/withdraw config endpoint without RSA
-    # Use the public currency info instead
-    resp2 = requests.get("https://api.lbank.info/v2/accuracy.do?symbol=all", timeout=TIMEOUT)
-    resp2.raise_for_status()
+    resp.raise_for_status()
     result = {}
-    for item in resp2.json().get("data", []):
-        coin = item.get("symbol", "").upper().replace("_USDT", "")
+    for item in resp.json().get("data", {}).get("assetInfo", []):
+        coin = item.get("coin", "").upper()
         if coin:
-            result[coin] = {"deposit": True, "withdraw": True}
+            result[coin] = {
+                "deposit": bool(item.get("canDeposit", False)),
+                "withdraw": bool(item.get("canWithdraw", False)),
+            }
     return result
 
 
