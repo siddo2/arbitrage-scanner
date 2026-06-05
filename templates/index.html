@@ -301,6 +301,13 @@
     .pair-cell { font-weight: 700; color: var(--text); font-family: var(--font); }
     .exchange-buy  { color: var(--orange); }
     .exchange-sell { color: var(--blue); }
+    .ex-link {
+      color: inherit;
+      text-decoration: none;
+      border-bottom: 1px dashed rgba(255,255,255,0.2);
+      transition: border-color 0.15s, opacity 0.15s;
+    }
+    .ex-link:hover { border-bottom-color: currentColor; opacity: 0.85; }
     .price { color: var(--text); }
 
     .spread { font-weight: 700; }
@@ -675,9 +682,9 @@
       return '<tr>' +
         '<td>' + (i + 1) + '</td>' +
         '<td class="pair-cell">' + icon + escHtml(op.pair) + '</td>' +
-        '<td class="exchange-buy">'  + escHtml(op.buy_exchange)  + '</td>' +
+        '<td class="exchange-buy">'  + exchangeLink(op.buy_exchange,  op.pair) + '</td>' +
         '<td class="price">'         + formatPrice(op.buy_price)  + '</td>' +
-        '<td class="exchange-sell">' + escHtml(op.sell_exchange) + '</td>' +
+        '<td class="exchange-sell">' + exchangeLink(op.sell_exchange, op.pair) + '</td>' +
         '<td class="price">'         + formatPrice(op.sell_price) + '</td>' +
         dwCell(dep) +
         dwCell(wit) +
@@ -694,6 +701,29 @@
   function escHtml(s) {
     return String(s)
       .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function exchangeUrl(exchange, pair) {
+    const base  = pair.split('/')[0].toLowerCase();
+    const URLS  = {
+      'Binance':  `https://www.binance.com/en/trade/${base.toUpperCase()}_USDT`,
+      'OKX':      `https://www.okx.com/trade-spot/${base}-usdt`,
+      'KuCoin':   `https://www.kucoin.com/trade/${base.toUpperCase()}-USDT`,
+      'Gate.io':  `https://www.gate.io/trade/${base.toUpperCase()}_USDT`,
+      'MEXC':     `https://www.mexc.com/exchange/${base.toUpperCase()}_USDT`,
+      'HTX':      `https://www.htx.com/trade/${base}_usdt`,
+      'CoinEx':   `https://www.coinex.com/trading?market=${base.toUpperCase()}USDT`,
+      'BitMart':  `https://www.bitmart.com/trade/en-US?symbol=${base.toUpperCase()}_USDT`,
+      'LBank':    `https://www.lbank.com/trade/${base}_usdt`,
+      'AscendEX': `https://ascendex.com/en/basic/cashtrade-spottrading/usdt/${base}`,
+      'XT':       `https://www.xt.com/en/trade/${base}_usdt`,
+    };
+    return URLS[exchange] || '#';
+  }
+
+  function exchangeLink(exchange, pair) {
+    const url = exchangeUrl(exchange, pair);
+    return `<a href="${url}" target="_blank" rel="noopener" class="ex-link">${escHtml(exchange)}</a>`;
   }
 
   // ── Render stats ──
