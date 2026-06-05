@@ -198,6 +198,34 @@ def _auth_gateio():
     return result
 
 
+def _auth_ascendex():
+    api_key = os.environ.get("ASCENDEX_API_KEY", "")
+    secret = os.environ.get("ASCENDEX_SECRET", "")
+    if not api_key or not secret:
+        return {}
+    ts = str(int(time.time() * 1000))
+    path = "api/pro/v1/asset/list"
+    msg = f"{ts}+{path}"
+    sig = hmac.new(secret.encode(), msg.encode(), hashlib.sha256).hexdigest()
+    headers = {
+        "x-auth-key": api_key,
+        "x-auth-signature": sig,
+        "x-auth-timestamp": ts,
+        "Content-Type": "application/json",
+    }
+    resp = requests.get(f"https://ascendex.com/{path}", headers=headers, timeout=TIMEOUT)
+    resp.raise_for_status()
+    result = {}
+    for item in resp.json().get("data", []):
+        coin = item.get("assetCode", "").upper()
+        if coin:
+            result[coin] = {
+                "deposit": bool(item.get("depositEnabled", False)),
+                "withdraw": bool(item.get("withdrawalEnabled", False)),
+            }
+    return result
+
+
 # ─── Dispatcher ───────────────────────────────────────────────────────────────
 
 _FETCHERS = {
@@ -208,11 +236,11 @@ _FETCHERS = {
     "XT":       _auth_xt,
     # exchanges below return {} until keys added
     "LBank":    _auth_lbank,
+    "AscendEX": _auth_ascendex,
     "Binance":  lambda: {},
     "OKX":      lambda: {},
     "CoinEx":   lambda: {},
     "BitMart":  lambda: {},
-    "AscendEX": lambda: {},
 }
 
 
