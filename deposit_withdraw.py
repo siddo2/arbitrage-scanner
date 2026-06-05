@@ -156,9 +156,8 @@ def _auth_lbank():
         "echostr": echostr,
     }
     query = "&".join(f"{k}={params[k]}" for k in sorted(params))
-    # LBank: sign = HMAC-SHA256(secret, MD5(query).upper())
-    md5_query = hashlib.md5(query.encode()).hexdigest().upper()
-    sig = hmac.new(secret.encode(), md5_query.encode(), hashlib.sha256).hexdigest().upper()
+    # LBank HmacSHA256: direct sign, lowercase hex
+    sig = hmac.new(secret.encode(), query.encode(), hashlib.sha256).hexdigest()
     data = {**params, "sign": sig}
     resp = requests.post(
         "https://api.lbank.info/v2/supplement/user_info_account.do",
