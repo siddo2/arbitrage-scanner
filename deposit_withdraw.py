@@ -146,11 +146,18 @@ def _auth_lbank():
     secret = os.environ.get("LBANK_SECRET", "")
     if not api_key or not secret:
         return {}
+    import random, string
     ts = str(int(time.time() * 1000))
-    params = {"api_key": api_key, "timestamp": ts}
+    echostr = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
+    params = {
+        "api_key": api_key,
+        "timestamp": ts,
+        "signature_method": "HmacSHA256",
+        "echostr": echostr,
+    }
     query = "&".join(f"{k}={params[k]}" for k in sorted(params))
     sig = hmac.new(secret.encode(), query.encode(), hashlib.sha256).hexdigest().upper()
-    data = {**params, "sign": sig, "sign_type": "1"}
+    data = {**params, "sign": sig}
     resp = requests.post(
         "https://api.lbank.info/v2/supplement/user_info_account.do",
         data=data, timeout=TIMEOUT
