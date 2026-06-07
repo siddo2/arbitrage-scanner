@@ -252,6 +252,20 @@
       transition: all 0.15s;
     }
     .btn:hover { border-color: var(--green); color: var(--green); }
+    .btn-pause.paused { border-color: var(--yellow); color: var(--yellow); }
+
+    .vs-select {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      padding: 6px 10px;
+      font-size: 13px;
+      outline: none;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+    .vs-select:focus { border-color: var(--green); }
 
     /* ── Main Table ── */
     .table-wrap {
@@ -493,6 +507,27 @@
   </div>
 
   <button class="btn" id="reset-btn">Reset Filters</button>
+  <button class="btn btn-pause" id="pause-btn">⏸ Pause</button>
+</div>
+
+<!-- Exchange vs Mode -->
+<div class="filter-bar" id="vs-bar">
+  <div class="filter-group">
+    <div class="filter-label">Mode</div>
+    <div class="exchange-checks">
+      <label class="ex-cb checked" id="mode-all"><input type="radio" name="vsmode" value="all" checked /> All vs All</label>
+      <label class="ex-cb" id="mode-one"><input type="radio" name="vsmode" value="one" /> 1 vs All</label>
+      <label class="ex-cb" id="mode-two"><input type="radio" name="vsmode" value="two" /> 1 vs 1</label>
+    </div>
+  </div>
+  <div class="filter-group" id="vs-ex1-group" style="display:none">
+    <div class="filter-label">Exchange A</div>
+    <select id="vs-ex1" class="vs-select"></select>
+  </div>
+  <div class="filter-group" id="vs-ex2-group" style="display:none">
+    <div class="filter-label">Exchange B</div>
+    <select id="vs-ex2" class="vs-select"></select>
+  </div>
 </div>
 
 <!-- Table -->
@@ -537,9 +572,11 @@
   let metadata = {};
   let firstLoad = true;
   let sortCol = 'spread_brut';
-  let sortDir = -1; // -1 desc
+  let sortDir = -1;
   let refreshTimer = null;
   let hideImpossible = false;
+  let isPaused = false;
+  let vsMode = 'all'; // 'all', 'one', 'two'
 
   const $ = id => document.getElementById(id);
 
@@ -560,6 +597,9 @@
   const volumeInput   = $('volume-input');
   const pairSearch    = $('pair-search');
   const resetBtn           = $('reset-btn');
+  const pauseBtn           = $('pause-btn');
+  const vsEx1Select        = $('vs-ex1');
+  const vsEx2Select        = $('vs-ex2');
   const loadingOverlay     = $('loading-overlay');
   const toast              = $('toast');
   const tableEl            = $('main-table');
@@ -603,6 +643,8 @@
     const minSpread = parseFloat(spreadSlider.value) || 0;
     const minVolume = parseFloat(volumeInput.value) || 0;
     const search    = pairSearch.value.trim().toUpperCase();
+    const exA       = vsEx1Select ? vsEx1Select.value : '';
+    const exB       = vsEx2Select ? vsEx2Select.value : '';
 
     return ops.filter(op => {
       if (op.spread_brut < minSpread) return false;
@@ -615,6 +657,14 @@
       if (search && !op.pair.toUpperCase().includes(search)) return false;
       if (hideImpossible) {
         if (op.deposit_ok === false || op.withdraw_ok === false) return false;
+      }
+      // VS mode filters
+      if (vsMode === 'one' && exA) {
+        if (op.buy_exchange !== exA && op.sell_exchange !== exA) return false;
+      }
+      if (vsMode === 'two' && exA && exB) {
+        const pair = [op.buy_exchange, op.sell_exchange];
+        if (!(pair.includes(exA) && pair.includes(exB))) return false;
       }
       return true;
     });
@@ -834,6 +884,7 @@
   }
 
   function scheduleRefresh() {
+    if (isPaused) return;
     if (refreshTimer) clearTimeout(refreshTimer);
     refreshTimer = setTimeout(() => fetchData().then(scheduleRefresh), REFRESH_MS);
   }
@@ -864,6 +915,50 @@
     applyFiltersAndRender();
   });
 
+  // ── Pause button ──
+  pauseBtn.addEventListener('click', () => {
+    isPaused = !isPaused;
+    if (isPaused) {
+      clearTimeout(refreshTimer);
+      pauseBtn.textContent = '▶ Resume';
+      pauseBtn.classList.add('paused');
+      showToast('Auto-refresh paused');
+    } else {
+      pauseBtn.textContent = '⏸ Pause';
+      pauseBtn.classList.remove('paused');
+      fetchData().then(scheduleRefresh);
+      showToast('Auto-refresh resumed');
+    }
+  });
+
+  // ── VS mode ──
+  function buildVsSelects() {
+    [vsEx1Select, vsEx2Select].forEach(sel => {
+      sel.innerHTML = '';
+      EXCHANGES_LIST.forEach(ex => {
+        const opt = document.createElement('option');
+        opt.value = ex; opt.textContent = ex;
+        sel.appendChild(opt);
+      });
+    });
+    if (vsEx2Select.options.length > 1) vsEx2Select.selectedIndex = 1;
+  }
+
+  document.querySelectorAll('input[name="vsmode"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      vsMode = radio.value;
+      $('vs-ex1-group').style.display = vsMode !== 'all' ? '' : 'none';
+      $('vs-ex2-group').style.display = vsMode === 'two' ? '' : 'none';
+      // Style mode buttons
+      document.querySelectorAll('#vs-bar .ex-cb').forEach(l => l.classList.remove('checked'));
+      radio.closest('.ex-cb').classList.add('checked');
+      applyFiltersAndRender();
+    });
+  });
+
+  vsEx1Select.addEventListener('change', applyFiltersAndRender);
+  vsEx2Select.addEventListener('change', applyFiltersAndRender);
+
   resetBtn.addEventListener('click', () => {
     spreadSlider.value = '0.3';
     spreadVal.textContent = '0.3%';
@@ -882,6 +977,7 @@
 
   // ── Init ──
   buildExchangeChecks();
+  buildVsSelects();
   setupSortHeaders();
   fetchData().then(scheduleRefresh);
 
